@@ -1,0 +1,10 @@
+__pycache__/
+*.pyc
+*.pyo
+venv/
+.venv/
+bin/*.exe
+bin/auto-editor
+*.egg-info/
+dist/
+build/

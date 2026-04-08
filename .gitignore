@@ -1,0 +1,17 @@
+# Metadata local
+.claude/
+.superpowers/
+*.png
+*.lnk
+*.rdp
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+.venv/
+venv/
+
+# OS
+desktop.ini
+Thumbs.db
