@@ -15,7 +15,7 @@
 
 ### 2. Integração com auto-editor — Processor
 - [X] 2.1 Criar `core/processor.py` com classe `SilenceCutterProcessor`
-- [X] 2.2 Implementar método `_build_command()` que monta o comando auto-editor a partir dos parâmetros (threshold, margin, smooth_mincut, smooth_minclip, input_path, output_path)
+- [X] 2.2 Implementar método `_build_command()` que monta o comando auto-editor a partir dos parâmetros (threshold, margin, input_path, output_path)
 - [X] 2.3 Implementar método `_resolve_binary_path()` que localiza o `auto-editor.exe` na pasta `bin/` relativa ao app
 - [X] 2.4 Implementar método `process()` que executa o comando via `subprocess.Popen` com `stdout=PIPE` e `stderr=PIPE`
 - [X] 2.5 Implementar callback `on_output(line: str)` para enviar linhas de log em tempo real para a GUI
@@ -65,19 +65,7 @@
 - [X] 7.3 Adicionar `CTkEntry` mostrando valor com sufixo "s"
 - [X] 7.4 Sincronizar slider ↔ entry (mesma lógica da task 6)
 
-### 8. Sidebar — Controle de Corte Mínimo
-- [X] 8.1 Adicionar label de seção "CORTE MÍNIMO"
-- [X] 8.2 Adicionar `CTkSlider` com range 0.0 a 2.0, padrão 0.2, step 0.05
-- [X] 8.3 Adicionar `CTkEntry` mostrando valor com sufixo "s"
-- [X] 8.4 Sincronizar slider ↔ entry
-
-### 9. Sidebar — Controle de Clipe Mínimo
-- [X] 9.1 Adicionar label de seção "CLIPE MÍNIMO"
-- [X] 9.2 Adicionar `CTkSlider` com range 0.0 a 2.0, padrão 0.1, step 0.05
-- [X] 9.3 Adicionar `CTkEntry` mostrando valor com sufixo "s"
-- [X] 9.4 Sincronizar slider ↔ entry
-
-### 10. Sidebar — Botões de ação
+### 8. Sidebar — Botões de ação
 - [X] 10.1 Adicionar botão "Pré-visualizar" com estilo outline (#6c5ce7 borda, fundo transparente)
 - [X] 10.2 Adicionar botão "Processar Vídeo" com estilo sólido (#6c5ce7 fundo, texto branco, bold)
 - [X] 10.3 Posicionar botões na parte inferior da sidebar com `pack(side="bottom")`
@@ -199,7 +187,7 @@
   - Grid layout com redimensionamento funcional
   - Validação de entrada (arquivo existe + formato suportado)
   - Verificação do binário auto-editor na inicialização
-  - Tooltips nos 4 sliders
+  - Tooltips nos 2 sliders
   - Fluxos de preview, processamento e cancelamento integrados via threads
 - **Observações:**
   - Task 21.3 (ícone): pendente — necessário fornecer arquivo `.ico`

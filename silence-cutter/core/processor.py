@@ -6,6 +6,8 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Callable, Optional
 
+from core.errors import BinaryNotFoundError
+
 
 @dataclass
 class ProcessorSettings:
@@ -15,11 +17,17 @@ class ProcessorSettings:
 
 
 class SilenceCutterProcessor:
-    def __init__(self):
+    def __init__(self, binary_path: str | None = None):
         self._process: Optional[subprocess.Popen] = None
         self._cancelled = False
+        self._cancel_event = threading.Event()
+        if binary_path:
+            self._binary_path = binary_path
+        else:
+            self._binary_path = self._resolve_binary_path()
 
-    def _resolve_binary_path(self) -> str:
+    @staticmethod
+    def _resolve_binary_path() -> str:
         app_dir = Path(__file__).resolve().parent.parent
         binary = app_dir / "bin" / "auto-editor.exe"
         if binary.exists():
@@ -31,18 +39,18 @@ class SilenceCutterProcessor:
         if path_binary:
             return path_binary
 
-        raise FileNotFoundError(
+        raise BinaryNotFoundError(
             "auto-editor.exe não encontrado na pasta bin/ nem no PATH do sistema."
         )
 
-    def _build_output_path(self, input_path: str) -> str:
+    def _build_output_path(self, input_path: str, output_format: str | None = None) -> str:
         p = Path(input_path)
-        return str(p.parent / f"{p.stem}_cut{p.suffix}")
+        ext = f".{output_format.lower()}" if output_format else p.suffix
+        return str(p.parent / f"{p.stem}_cut{ext}")
 
     def _build_command(self, settings: ProcessorSettings, output_path: str) -> list[str]:
-        binary = self._resolve_binary_path()
         cmd = [
-            binary,
+            self._binary_path,
             settings.input_path,
             "--edit", f"audio:{settings.threshold_db}dB",
             "--margin", f"{settings.margin}s",
@@ -57,9 +65,11 @@ class SilenceCutterProcessor:
         on_output: Optional[Callable[[str], None]] = None,
         on_progress: Optional[Callable[[float], None]] = None,
         on_complete: Optional[Callable[[bool, str], None]] = None,
-    ) -> None:
+        output_format: str | None = None,
+    ) -> threading.Thread | None:
         self._cancelled = False
-        output_path = self._build_output_path(settings.input_path)
+        self._cancel_event.clear()
+        output_path = self._build_output_path(settings.input_path, output_format)
 
         try:
             cmd = self._build_command(settings, output_path)
@@ -68,7 +78,7 @@ class SilenceCutterProcessor:
                 on_output(f"[ERROR] {e}")
             if on_complete:
                 on_complete(False, "")
-            return
+            return None
 
         def _run():
             try:
@@ -81,17 +91,19 @@ class SilenceCutterProcessor:
                     creationflags=subprocess.CREATE_NO_WINDOW,
                 )
 
-                buf = ""
-                while True:
-                    ch = self._process.stdout.read(1)
-                    if not ch:
+                timeout_timer = threading.Timer(300.0, self._kill_process)
+                timeout_timer.daemon = True
+                timeout_timer.start()
+
+                for raw_line in iter(self._process.stdout.readline, ''):
+                    if self._cancelled or self._cancel_event.is_set():
                         break
-                    if ch in ("\n", "\r"):
-                        line = buf.strip()
-                        buf = ""
+                    # Handle \r for progress lines (no \n)
+                    parts = raw_line.split('\r')
+                    for part in parts:
+                        line = part.strip()
                         if not line:
                             continue
-
                         percent = self._parse_progress(line)
                         if percent is not None:
                             if on_progress:
@@ -99,12 +111,8 @@ class SilenceCutterProcessor:
                         else:
                             if on_output:
                                 on_output(line)
-                    else:
-                        buf += ch
 
-                if buf.strip():
-                    if on_output:
-                        on_output(buf.strip())
+                timeout_timer.cancel()
 
                 self._process.wait()
                 success = self._process.returncode == 0 and not self._cancelled
@@ -128,6 +136,7 @@ class SilenceCutterProcessor:
 
         thread = threading.Thread(target=_run, daemon=True)
         thread.start()
+        return thread
 
     def _parse_progress(self, line: str) -> Optional[float]:
         # Machine format: "(mp4) h264+aac~current~total~eta"
@@ -146,5 +155,16 @@ class SilenceCutterProcessor:
 
     def cancel(self) -> None:
         self._cancelled = True
+        self._cancel_event.set()
         if self._process:
             self._process.terminate()
+            try:
+                self._process.wait(timeout=5)
+            except subprocess.TimeoutExpired:
+                self._process.kill()
+
+    def _kill_process(self):
+        """Kill process on timeout."""
+        self._cancelled = True
+        if self._process:
+            self._process.kill()

@@ -1,10 +1,14 @@
+import logging
 import re
 import subprocess
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Optional
 
+from core.errors import AnalysisError, BinaryNotFoundError
 from core.processor import SilenceCutterProcessor
+
+logger = logging.getLogger(__name__)
 
 
 @dataclass
@@ -12,11 +16,30 @@ class AnalysisResult:
     original_duration: float  # seconds
     estimated_duration: float  # seconds
     silence_removed: float  # seconds
+    raw_output: str = ""
+
+
+@dataclass
+class VideoInfo:
+    name: str
+    size_bytes: int
+    format_ext: str
+
+
+def get_video_info(path: str) -> VideoInfo:
+    """Get basic video file info."""
+    import os
+    p = Path(path)
+    return VideoInfo(
+        name=p.name,
+        size_bytes=os.path.getsize(path),
+        format_ext=p.suffix.lower(),
+    )
 
 
 class SilenceCutterAnalyzer:
-    def __init__(self):
-        self._processor_helper = SilenceCutterProcessor()
+    def __init__(self, binary_path: str | None = None):
+        self._binary_path = binary_path
 
     def analyze(
         self,
@@ -24,9 +47,10 @@ class SilenceCutterAnalyzer:
         threshold_db: int = -24,
         margin: float = 0.2,
     ) -> AnalysisResult:
-        binary = self._processor_helper._resolve_binary_path()
+        if self._binary_path is None:
+            raise BinaryNotFoundError("auto-editor não encontrado. Verifique a instalação.")
         cmd = [
-            binary,
+            self._binary_path,
             input_path,
             "--edit", f"audio:{threshold_db}dB",
             "--margin", f"{margin}s",
@@ -43,18 +67,20 @@ class SilenceCutterAnalyzer:
         )
 
         output = result.stdout + "\n" + result.stderr
-        return self._parse_stats(output)
+        return self._parse_stats(output, raw_output=output)
 
-    def _parse_stats(self, output: str) -> AnalysisResult:
+    def _parse_stats(self, output: str, raw_output: str = "") -> AnalysisResult:
         original = self._extract_duration(output, r"-\s*input:\s+(\S+)", r"(?:input|source)\s+duration[:\s]+(\S+)")
         estimated = self._extract_duration(output, r"-\s*output:\s+(\S+)", r"(?:output|new)\s+duration[:\s]+(\S+)")
 
         # Fallback: parse speed-up ratio
         if original is None or estimated is None:
+            logger.warning("Primary patterns failed, using speed-up ratio fallback")
             original, estimated = self._parse_from_speed_ratio(output, original, estimated)
 
         # Fallback: try to extract any two durations from the output
         if original is None or estimated is None:
+            logger.warning("Speed-up ratio fallback failed, using duration extraction fallback")
             durations = self._extract_all_durations(output)
             if len(durations) >= 2:
                 original = original or durations[0]
@@ -62,12 +88,17 @@ class SilenceCutterAnalyzer:
 
         original = original or 0.0
         estimated = estimated or 0.0
+
+        if original == 0.0:
+            raise AnalysisError(f"Failed to parse stats from auto-editor output:\n{output}")
+
         silence = max(0.0, original - estimated)
 
         return AnalysisResult(
             original_duration=original,
             estimated_duration=estimated,
             silence_removed=silence,
+            raw_output=raw_output,
         )
 
     def _extract_duration(self, output: str, *patterns: str) -> Optional[float]:

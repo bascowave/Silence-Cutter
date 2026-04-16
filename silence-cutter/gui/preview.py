@@ -1,8 +1,13 @@
 import customtkinter as ctk
 
+from gui.stats_panel import StatsPanel
+from gui.progress_panel import ProgressPanel
+from gui.log_panel import LogPanel
+from gui.result_panel import ResultPanel
+
 
 class PreviewPanel(ctk.CTkFrame):
-    """Painel principal: stats, progresso, log e resultado."""
+    """Container principal que orquestra stats, progresso, log e resultado."""
 
     def __init__(self, master):
         super().__init__(master, fg_color="#0d0d1a", corner_radius=8)
@@ -10,146 +15,121 @@ class PreviewPanel(ctk.CTkFrame):
         self.grid_rowconfigure(3, weight=1)  # log expands
         self.grid_columnconfigure(0, weight=1)
 
-        self._build_stats()
-        self._build_progress()
-        self._build_log()
-        self._build_result()
+        # Create sub-panels
+        self._stats_panel = StatsPanel(self)
+        self._stats_panel.grid(row=0, column=0, padx=16, pady=(16, 8), sticky="ew")
 
-    # ── Stats ─────────────────────────────────────────────────────
+        self._progress_panel = ProgressPanel(self)
+        self._progress_panel.grid(row=1, column=0, padx=16, pady=(8, 4), sticky="ew")
 
-    def _build_stats(self):
+        self._info_frame = self._build_info()
+        # not gridded initially
+
+        self._log_panel = LogPanel(self)
+        self._log_panel.grid(row=3, column=0, padx=16, pady=(4, 8), sticky="nsew")
+
+        self._result_panel = ResultPanel(self)
+        # initially hidden
+
+    # ── Info (mantido no PreviewPanel pois é coordenado com progress) ──
+
+    def _build_info(self):
         frame = ctk.CTkFrame(self, fg_color="#151528", corner_radius=8)
-        frame.grid(row=0, column=0, padx=16, pady=(16, 8), sticky="ew")
         frame.grid_columnconfigure((0, 1, 2), weight=1)
 
-        self._stat_original = self._stat_column(frame, 0, "Original", "#ffffff")
-        self._stat_estimated = self._stat_column(frame, 1, "Após corte", "#6c5ce7")
-        self._stat_removed = self._stat_column(frame, 2, "Silêncio removido", "#e74c3c")
+        self._info_name = self._info_column(frame, 0, "Arquivo", "#ccc")
+        self._info_size = self._info_column(frame, 1, "Tamanho", "#ccc")
+        self._info_format = self._info_column(frame, 2, "Formato", "#ccc")
 
-    def _stat_column(self, parent, col, label, color):
+        return frame
+
+    def _info_column(self, parent, col, label, color):
         frame = ctk.CTkFrame(parent, fg_color="transparent")
-        frame.grid(row=0, column=col, padx=12, pady=12)
+        frame.grid(row=0, column=col, padx=12, pady=8)
 
         val = ctk.CTkLabel(
             frame, text="—",
-            font=ctk.CTkFont(size=24, weight="bold"),
+            font=ctk.CTkFont(size=12, weight="bold"),
             text_color=color,
         )
         val.pack()
 
         ctk.CTkLabel(
             frame, text=label,
-            font=ctk.CTkFont(size=11),
-            text_color="#888",
+            font=ctk.CTkFont(size=10),
+            text_color="#666",
         ).pack()
 
         return val
 
+    def show_info(self, name: str, size: str, format_ext: str):
+        """Show video file info."""
+        self._info_name.configure(text=name)
+        self._info_size.configure(text=size)
+        self._info_format.configure(text=format_ext.upper())
+        self._info_frame.grid(row=2, column=0, padx=16, pady=(4, 4), sticky="ew")
+        # Shift log down when info is shown
+        self._log_panel.grid(row=4, column=0, padx=16, pady=(4, 8), sticky="nsew")
+
+    def hide_info(self):
+        """Hide info section."""
+        self._info_frame.grid_forget()
+        # Reset log position when info is hidden
+        self._log_panel.grid(row=3, column=0, padx=16, pady=(4, 8), sticky="nsew")
+
+    # ── Stats (delegated to StatsPanel) ───────────────────────────
+
     def update_stats(self, original: float, estimated: float, removed: float):
-        self._stat_original.configure(text=self._fmt_time(original))
-        self._stat_estimated.configure(text=self._fmt_time(estimated))
-        self._stat_removed.configure(text=self._fmt_time(removed))
+        self._stats_panel.update_stats(original, estimated, removed)
 
-    # ── Progress ──────────────────────────────────────────────────
-
-    def _build_progress(self):
-        frame = ctk.CTkFrame(self, fg_color="transparent")
-        frame.grid(row=1, column=0, padx=16, pady=(8, 4), sticky="ew")
-        frame.grid_columnconfigure(0, weight=1)
-
-        self._progress_bar = ctk.CTkProgressBar(
-            frame, progress_color="#6c5ce7", fg_color="#2d2d44",
-            height=12, corner_radius=6,
-        )
-        self._progress_bar.grid(row=0, column=0, sticky="ew")
-        self._progress_bar.set(0)
-
-        self._lbl_progress = ctk.CTkLabel(
-            frame, text="0% — Aguardando...",
-            font=ctk.CTkFont(size=11), text_color="#888",
-        )
-        self._lbl_progress.grid(row=1, column=0, pady=(4, 0))
+    # ── Progress (delegated to ProgressPanel) ─────────────────────
 
     def update_progress(self, percent: float, message: str = ""):
-        self._progress_bar.set(percent / 100.0)
-        msg = message or f"{percent:.0f}%"
-        self._lbl_progress.configure(text=msg)
+        self._progress_panel.update_progress(percent, message)
 
     def reset_progress(self):
-        self._progress_bar.set(0)
-        self._lbl_progress.configure(text="0% — Aguardando...")
+        self._progress_panel.reset_progress()
 
-    # ── Log ───────────────────────────────────────────────────────
+    # ── Loading (delegated to ProgressPanel) ──────────────────────
 
-    def _build_log(self):
-        self._log = ctk.CTkTextbox(
-            self, fg_color="#0a0a18", text_color="#aaa",
-            font=ctk.CTkFont(family="Consolas", size=12),
-            state="disabled", corner_radius=8,
-        )
-        self._log.grid(row=3, column=0, padx=16, pady=(4, 8), sticky="nsew")
+    def show_loading(self, message: str = "Analisando..."):
+        self._progress_panel.show_loading(message)
 
-    _LOG_COLORS = {"INFO": "#6c5ce7", "WARN": "#e8a838", "ERROR": "#e74c3c"}
+    def hide_loading(self):
+        self._progress_panel.hide_loading()
+
+    # ── Batch Progress (delegated to ProgressPanel) ───────────────
+
+    def show_batch_progress(self, current: int, total: int):
+        self._progress_panel.show_batch_progress(current, total)
+
+    def hide_batch_progress(self):
+        self._progress_panel.hide_batch_progress()
+
+    def update_batch_progress(self, current: int, total: int):
+        self._progress_panel.update_batch_progress(current, total)
+
+    # ── Log (delegated to LogPanel) ───────────────────────────────
 
     def append_log(self, line: str, level: str = "INFO"):
-        tag = f"log_{level}"
-        color = self._LOG_COLORS.get(level, "#aaa")
-        self._log.configure(state="normal")
-        self._log.tag_config(tag, foreground=color)
-        self._log.insert("end", line + "\n", tag)
-        self._log.see("end")
-        self._log.configure(state="disabled")
+        self._log_panel.append_log(line, level)
 
     def clear_log(self):
-        self._log.configure(state="normal")
-        self._log.delete("1.0", "end")
-        self._log.configure(state="disabled")
+        self._log_panel.clear_log()
 
-    # ── Result ────────────────────────────────────────────────────
-
-    def _build_result(self):
-        self._result_frame = ctk.CTkFrame(
-            self, fg_color="#1a3a1a", border_color="#2d6b2d",
-            border_width=1, corner_radius=8,
-        )
-        # initially hidden
-
-        self._lbl_result = ctk.CTkLabel(
-            self._result_frame, text="",
-            font=ctk.CTkFont(size=13), text_color="#4ade80",
-            wraplength=400,
-        )
-        self._lbl_result.pack(padx=16, pady=(12, 4))
-
-        self._btn_open_folder = ctk.CTkButton(
-            self._result_frame, text="Abrir Pasta",
-            fg_color="#2d6b2d", hover_color="#3d8b3d",
-            width=120,
-        )
-        self._btn_open_folder.pack(pady=(4, 12))
+    # ── Result (delegated to ResultPanel) ─────────────────────────
 
     def show_result(self, output_path: str):
-        import os
-        self._lbl_result.configure(
-            text=f"Concluído!\n{output_path}"
-        )
-        self._btn_open_folder.configure(
-            command=lambda: os.startfile(os.path.dirname(output_path))
-        )
-        self._result_frame.grid(row=4, column=0, padx=16, pady=(4, 16),
-                                sticky="ew")
+        self._result_panel.show_result(output_path)
+        self._result_panel.grid(row=5, column=0, padx=16, pady=(4, 16), sticky="ew")
 
     def hide_result(self):
-        self._result_frame.grid_forget()
+        self._result_panel.hide_result()
+        self._result_panel.grid_forget()
 
     # ── Helpers ───────────────────────────────────────────────────
 
     @staticmethod
     def _fmt_time(seconds: float) -> str:
-        if seconds <= 0:
-            return "—"
-        m, s = divmod(int(seconds), 60)
-        h, m = divmod(m, 60)
-        if h > 0:
-            return f"{h}:{m:02d}:{s:02d}"
-        return f"{m}:{s:02d}"
+        """Format seconds as time string."""
+        return StatsPanel._fmt_time(seconds)
