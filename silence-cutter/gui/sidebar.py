@@ -22,8 +22,10 @@ class _Tooltip:
         self._text = text
         self._tw = None
         self._after_id = None
+        self._auto_hide_id = None
+        self._hovering = False
         widget.bind("<Enter>", self._schedule_show)
-        widget.bind("<Leave>", self._hide)
+        widget.bind("<Leave>", self._on_leave)
         # Esconde tooltip quando a janela principal é minimizada ou perde foco
         top = widget.winfo_toplevel()
         top.bind("<Unmap>", self._hide, add="+")
@@ -31,15 +33,27 @@ class _Tooltip:
 
     def _schedule_show(self, event=None):
         self._cancel_schedule()
+        self._hovering = True
         self._after_id = self._widget.after(400, self._show)
 
     def _cancel_schedule(self):
         if self._after_id:
             self._widget.after_cancel(self._after_id)
             self._after_id = None
+        if self._auto_hide_id:
+            self._widget.after_cancel(self._auto_hide_id)
+            self._auto_hide_id = None
+
+    def _on_leave(self, event=None):
+        """Called when mouse leaves the widget."""
+        self._hovering = False
+        self._hide()
 
     def _show(self, event=None):
         self._after_id = None
+        # Se o mouse já saiu, não mostrar
+        if not self._hovering:
+            return
         # Não mostra se a janela principal não estiver visível
         top = self._widget.winfo_toplevel()
         try:
@@ -47,6 +61,8 @@ class _Tooltip:
                 return
         except Exception:
             return
+        # Se já existe, destruir o anterior
+        self._hide_silent()
         x = self._widget.winfo_rootx() + self._widget.winfo_width() + 4
         y = self._widget.winfo_rooty()
         self._tw = tw = ctk.CTkToplevel(self._widget)
@@ -60,11 +76,21 @@ class _Tooltip:
             wraplength=200,
         )
         label.pack(padx=2, pady=2)
+        # Auto-hide after 3 seconds to prevent stuck tooltips
+        self._auto_hide_id = self._widget.after(3000, self._hide)
 
     def _hide(self, event=None):
         self._cancel_schedule()
-        if self._tw:
-            self._tw.destroy()
+        self._hovering = False
+        self._hide_silent()
+
+    def _hide_silent(self):
+        """Hide tooltip without resetting hover state (for internal use)."""
+        if self._tw is not None:
+            try:
+                self._tw.destroy()
+            except Exception:
+                pass
             self._tw = None
 
 
@@ -113,7 +139,6 @@ class Sidebar(ctk.CTkFrame):
         )
         self._btn_select.grid(row=row, column=0, padx=16, pady=(4, 2),
                               sticky="ew")
-        _Tooltip(self._btn_select, "Selecionar arquivo de vídeo (Ctrl+O)")
         row += 1
 
         self._lbl_filename = ctk.CTkLabel(
@@ -149,7 +174,7 @@ class Sidebar(ctk.CTkFrame):
 
     def _build_threshold_section(self):
         row = 3
-        self._section_label("THRESHOLD", row)
+        self._section_label("THRESHOLD", row, "Volume abaixo do qual o áudio é considerado silêncio (dB)")
         row += 1
 
         frame = ctk.CTkFrame(self, fg_color="transparent")
@@ -167,8 +192,6 @@ class Sidebar(ctk.CTkFrame):
                 v, self._entry_threshold, "dB", is_int=True),
         )
         self._slider_threshold.grid(row=0, column=0, sticky="ew", padx=(0, 8))
-        _Tooltip(self._slider_threshold,
-                 "Volume abaixo do qual o áudio é considerado silêncio (dB)")
 
         self._entry_threshold = ctk.CTkEntry(
             frame, width=70, justify="center",
@@ -189,7 +212,7 @@ class Sidebar(ctk.CTkFrame):
 
     def _build_margin_section(self):
         row = 5
-        self._section_label("MARGEM", row)
+        self._section_label("MARGEM", row, "Tempo extra mantido antes e depois de cada trecho com áudio")
         row += 1
 
         frame = ctk.CTkFrame(self, fg_color="transparent")
@@ -207,8 +230,6 @@ class Sidebar(ctk.CTkFrame):
                 v, self._entry_margin, "s"),
         )
         self._slider_margin.grid(row=0, column=0, sticky="ew", padx=(0, 8))
-        _Tooltip(self._slider_margin,
-                 "Tempo extra mantido antes e depois de cada trecho com áudio")
 
         self._entry_margin = ctk.CTkEntry(
             frame, width=70, justify="center",
@@ -229,7 +250,7 @@ class Sidebar(ctk.CTkFrame):
 
     def _build_preset_section(self):
         row = 7
-        self._section_label("PRESET", row)
+        self._section_label("PRESET", row, "Configurações pré-definidas para diferentes tipos de conteúdo")
         row += 1
 
         self._preset_var = ctk.StringVar(value="Personalizado")
@@ -265,7 +286,7 @@ class Sidebar(ctk.CTkFrame):
 
     def _build_output_format_section(self):
         row = 9
-        self._section_label("FORMATO DE SAÍDA", row)
+        self._section_label("FORMATO DE SAÍDA", row, "Formato do arquivo de vídeo processado")
         row += 1
 
         self._output_format_var = ctk.StringVar(value="Mesmo do original")
@@ -295,7 +316,6 @@ class Sidebar(ctk.CTkFrame):
         )
         self._btn_preview.grid(row=row, column=0, padx=16, pady=(0, 8),
                                sticky="ew")
-        _Tooltip(self._btn_preview, "Analisar e pré-visualizar resultado (Ctrl+P)")
         row += 1
 
         self._btn_process = ctk.CTkButton(
@@ -306,7 +326,6 @@ class Sidebar(ctk.CTkFrame):
         )
         self._btn_process.grid(row=22, column=0, padx=16, pady=(0, 16),
                                sticky="ew")
-        _Tooltip(self._btn_process, "Iniciar processamento do vídeo (Ctrl+Enter)")
 
         self._btn_cancel = ctk.CTkButton(
             self, text="Cancelar",
@@ -314,18 +333,30 @@ class Sidebar(ctk.CTkFrame):
             font=ctk.CTkFont(weight="bold"),
             command=self._on_cancel_click,
         )
-        _Tooltip(self._btn_cancel, "Cancelar processamento (Esc)")
         # initially hidden
 
     # ── Helpers ───────────────────────────────────────────────────
 
-    def _section_label(self, text: str, row: int):
+    def _section_label(self, text: str, row: int, tooltip_text: str = ""):
+        frame = ctk.CTkFrame(self, fg_color="transparent")
+        frame.grid(row=row, column=0, padx=16, pady=(12, 0), sticky="w")
+        frame.grid_columnconfigure(0, weight=0)
+
         lbl = ctk.CTkLabel(
-            self, text=text, text_color="#666",
+            frame, text=text, text_color="#666",
             font=ctk.CTkFont(size=11, weight="bold"),
             anchor="w",
         )
-        lbl.grid(row=row, column=0, padx=16, pady=(12, 0), sticky="w")
+        lbl.grid(row=0, column=0, sticky="w")
+
+        if tooltip_text:
+            info_btn = ctk.CTkLabel(
+                frame, text="ⓘ", text_color="#6c5ce7",
+                font=ctk.CTkFont(size=12, weight="bold"),
+                cursor="hand2",
+            )
+            info_btn.grid(row=0, column=1, padx=(4, 0))
+            _Tooltip(info_btn, tooltip_text)
 
     def _sync_slider_to_entry(self, value, entry, suffix, is_int=False):
         entry.delete(0, "end")
@@ -365,7 +396,7 @@ class Sidebar(ctk.CTkFrame):
     def _build_file_list_section(self):
         """Build the file list section for batch processing."""
         row = 11
-        self._section_label("ARQUIVOS (LOTE)", row)
+        self._section_label("ARQUIVOS (LOTE)", row, "Adicione múltiplos arquivos para processamento em lote")
         row += 1
 
         # Add files button
